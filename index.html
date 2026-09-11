@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ravamate · Engagement</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div>
+            <p class="eyebrow">Ravamate / Analytics</p>
+            <h1>Engagement pulse</h1>
+          </div>
+        </div>
+        <div class="report-meta" id="lastUpdated">Loading report…</div>
+      </header>
+
+      <section class="hero">
+        <div>
+          <p class="eyebrow amber">Mobile app activity</p>
+          <h2>See who’s coming back,<br /><em>and how deeply they use it.</em></h2>
+        </div>
+        <div class="range-panel" aria-label="Date range filter">
+          <div class="range-head">
+            <span>Reporting period</span>
+            <button class="text-button" id="resetRange" type="button">All data</button>
+          </div>
+          <div class="date-inputs">
+            <label>From <input id="startDate" type="date" /></label>
+            <i></i>
+            <label>To <input id="endDate" type="date" /></label>
+          </div>
+          <div class="presets" aria-label="Quick date ranges">
+            <button data-days="30" type="button">30D</button>
+            <button data-days="90" type="button">90D</button>
+            <button data-days="180" type="button">6M</button>
+            <button data-days="365" type="button">1Y</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="metric-grid" aria-label="Engagement summary">
+        <article class="metric-card accent-card">
+          <div class="metric-label">Weekly active users <span class="info" title="The most recent week in the selected range">i</span></div>
+          <strong id="activeValue">—</strong>
+          <div class="metric-foot" id="activeChange">—</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Avg. use per active user</div>
+          <strong id="usageValue">—</strong>
+          <div class="metric-foot">minutes per day <span class="dot">·</span> weekly average</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Returning user share</div>
+          <strong id="returningValue">—</strong>
+          <div class="metric-foot" id="returningFoot">of daily active users</div>
+        </article>
+        <article class="metric-card soft-card">
+          <div class="metric-label">Estimated dormant users <span class="info" title="All known users (1,768) minus latest weekly active users">i</span></div>
+          <strong id="inactiveValue">—</strong>
+          <div class="metric-foot">of 1,768 known users</div>
+        </article>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="panel large-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Audience movement</p>
+              <h3>Active vs. dormant users</h3>
+            </div>
+            <div class="legend">
+              <span><b class="legend-dot active"></b> Weekly active</span>
+              <span><b class="legend-dot dormant"></b> Dormant estimate</span>
+            </div>
+          </div>
+          <div class="chart-wrap"><svg id="audienceChart" class="chart" role="img" aria-label="Weekly active and dormant user trend"></svg><div class="tooltip" id="audienceTooltip"></div></div>
+          <p class="panel-note">Dormant estimate = 1,768 known users minus weekly active users. It indicates users not active in that week, rather than a permanent status.</p>
+        </article>
+
+        <article class="panel usage-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Depth of use</p>
+              <h3>Time in the app</h3>
+            </div>
+            <span class="unit-pill">min / day</span>
+          </div>
+          <div class="chart-wrap compact"><svg id="usageChart" class="chart" role="img" aria-label="Average time in app per active user"></svg><div class="tooltip" id="usageTooltip"></div></div>
+          <div class="usage-readout"><span>Selected range avg.</span><strong id="usageAverage">—</strong></div>
+        </article>
+
+        <article class="panel acquisition-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Daily activity</p>
+              <h3>New &amp; returning users</h3>
+            </div>
+            <div class="legend single"><span><b class="legend-dot new"></b> New</span><span><b class="legend-dot returning"></b> Returning</span></div>
+          </div>
+          <div class="chart-wrap compact"><svg id="dailyChart" class="chart" role="img" aria-label="Daily new and returning users"></svg><div class="tooltip" id="dailyTooltip"></div></div>
+        </article>
+      </section>
+
+      <section class="insight-strip" id="insightStrip">
+        <div class="spark">✦</div>
+        <p><span>Reading the data</span><strong id="insightText">Loading engagement pattern…</strong></p>
+      </section>
+
+      <footer>
+        <span>Source: Firebase exports · Engagement &amp; Retention</span>
+        <span>Times are based on aggregate active-user reporting, not individual user sessions.</span>
+      </footer>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
