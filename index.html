@@ -31,7 +31,7 @@
         </div>
       </header>
 
-      <p class="data-note">Data covers <strong id="fullRange">the supplied export</strong>. The report updates from <code>Engagement_all.csv</code> and <code>Retention_all.csv</code>.</p>
+      <p class="data-note">Data covers <strong id="fullRange">the supplied export</strong>. The report updates from <code>Engagement_all.csv</code>, <code>Retention_all.csv</code> and <code>per_user.csv</code>.</p>
 
       <section class="kpi-row" aria-label="Engagement summary">
         <article class="kpi"><div><strong id="dauValue">—</strong><span id="dauDelta" class="delta"></span></div><p>Avg. daily active users</p></article>
@@ -78,6 +78,29 @@
             <p class="panel-foot">Recent cohorts have not yet had time to reach later retention milestones.</p>
           </article>
         </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head"><h2>Per-user usage</h2><p>How daily minutes are spread across individual users, from <code>per_user.csv</code>. Trend lines track the mean, median and 90th percentile per day.</p></div>
+        <p id="perUserHeadline" class="section-lede" aria-live="polite"></p>
+        <div id="perUserStats" class="stat-strip" aria-label="Per-user usage summary"></div>
+        <div class="panel-grid">
+          <article class="panel">
+            <div class="panel-top"><div class="legend"><span><i class="forest"></i>Mean</span><span><i class="amber"></i>Median</span><span><i class="plum"></i>P90</span></div></div>
+            <div class="chart-box"><svg id="perUserTrendChart" class="chart" role="img" aria-label="Mean, median and 90th percentile of daily minutes per user"></svg><div id="perUserTrendTooltip" class="tooltip"></div></div>
+            <p class="panel-foot">Per-day average, median and 90th percentile of <code>daily_minutes_used</code> among users active that day.</p>
+          </article>
+          <article class="panel">
+            <div class="panel-top"><div class="legend"><span><i class="forest"></i>User-days in range</span></div><span class="unit-note">Histogram</span></div>
+            <div class="chart-box"><svg id="perUserHistChart" class="chart" role="img" aria-label="Distribution of daily minutes per user"></svg><div id="perUserHistTooltip" class="tooltip"></div></div>
+            <p class="panel-foot">All user-day observations in the selected range, grouped by minutes used that day.</p>
+          </article>
+        </div>
+        <article class="panel table-panel">
+          <div class="panel-top"><div class="legend"><span><i class="amber"></i>Top users in range</span></div><button id="exportPerUser" class="export-button" type="button">Export per-user rows</button></div>
+          <div class="table-wrap"><table id="perUserTable" class="data-table" aria-label="Top users by minutes in selected range"></table></div>
+          <p class="panel-foot">Ranked by total minutes in the selected range — these are the heaviest users (extreme tail), not typical users. IDs are truncated to 8 characters for readability.</p>
+        </article>
       </section>
 
       <aside class="insight-strip"><span aria-hidden="true">✦</span><p><small>Reading the data</small><strong id="insightText">Loading CSV data…</strong></p></aside>

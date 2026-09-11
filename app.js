@@ -1,6 +1,9 @@
 /* Ravamate report — all values below are parsed from the supplied Firebase CSV exports. */
 const DAY = 86_400_000;
-const state = { daily: {}, weekly: {}, retention: {}, min: null, max: null };
+const state = { daily: {}, weekly: {}, retention: {}, perUser: { rows: [], available: false }, min: null, max: null };
+
+const PER_USER_BUCKETS = [0, 5, 15, 30, 60, 120, 240, Infinity];
+const PER_USER_BUCKET_LABELS = ['0–5', '5–15', '15–30', '30–60', '60–120', '120–240', '240+'];
 
 const iso = date => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 const ymdDate = ymd => new Date(+ymd.slice(0, 4), +ymd.slice(4, 6) - 1, +ymd.slice(6, 8));
@@ -47,6 +50,59 @@ function toPoints(source, column) {
 
 function inRange(data, start, end) {
   return data.filter(point => point.date >= start && point.date <= end);
+}
+
+function parsePerUser(text) {
+  const rows = [];
+  const lines = text.replace(/\r/g, '').split('\n');
+  if (!lines.length) return rows;
+  const header = lines[0].split(',').map(part => part.trim());
+  const userIdx = header.indexOf('user_pseudo_id');
+  const dateIdx = header.indexOf('usage_date');
+  const minsIdx = header.indexOf('daily_minutes_used');
+  if (userIdx < 0 || dateIdx < 0 || minsIdx < 0) return rows;
+  for (let i = 1; i < lines.length; i += 1) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const parts = line.split(',');
+    if (parts.length <= Math.max(userIdx, dateIdx, minsIdx)) continue;
+    const minutes = Number(parts[minsIdx]);
+    if (!Number.isFinite(minutes) || minutes < 0) continue;
+    const stamp = parts[dateIdx].trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(stamp)) continue;
+    const date = new Date(+stamp.slice(0, 4), +stamp.slice(5, 7) - 1, +stamp.slice(8, 10));
+    rows.push({ user: parts[userIdx].trim(), date, minutes });
+  }
+  return rows;
+}
+
+function quantile(sorted, q) {
+  if (!sorted.length) return 0;
+  const pos = (sorted.length - 1) * q;
+  const base = Math.floor(pos);
+  const rest = pos - base;
+  return sorted[base] + (sorted[base + 1] !== undefined ? rest * (sorted[base + 1] - sorted[base]) : 0);
+}
+
+function perUserDailyStats(rows) {
+  const byDate = new Map();
+  rows.forEach(row => {
+    const key = iso(row.date);
+    if (!byDate.has(key)) byDate.set(key, { date: row.date, values: [] });
+    byDate.get(key).values.push(row.minutes);
+  });
+  return [...byDate.values()]
+    .map(entry => {
+      const sorted = entry.values.slice().sort((a, b) => a - b);
+      return {
+        date: entry.date,
+        count: sorted.length,
+        mean: average(sorted),
+        median: quantile(sorted, 0.5),
+        p90: quantile(sorted, 0.9)
+      };
+    })
+    .sort((a, b) => a.date - b.date);
 }
 
 function previousRange(data, current) {
@@ -126,6 +182,121 @@ function renderChart(svgId, tooltipId, series, options = {}) {
   svg.onmouseleave = () => { tooltip.style.display = 'none'; };
 }
 
+function renderHistogram(svgId, tooltipId, labels, counts) {
+  const svg = document.getElementById(svgId);
+  const tooltip = document.getElementById(tooltipId);
+  const total = counts.reduce((sum, value) => sum + value, 0);
+  const width = Math.max(280, svg.clientWidth || 520);
+  const height = Math.max(180, svg.clientHeight || 255);
+  if (!total) { svg.innerHTML = `<text x="${width / 2}" y="${height / 2}" text-anchor="middle">No per-user data in this range</text>`; return; }
+  const pad = { top: 12, right: 12, bottom: 44, left: 40 };
+  const max = Math.max(1, ...counts) * 1.08;
+  const innerW = width - pad.left - pad.right;
+  const innerH = height - pad.top - pad.bottom;
+  const y = value => pad.top + innerH - (value / max) * innerH;
+  const slot = innerW / counts.length;
+  const barW = Math.max(8, Math.min(64, slot * 0.62));
+  let markup = '';
+  [0, 0.5, 1].forEach(ratio => {
+    const value = max * ratio;
+    const yy = y(value);
+    markup += `<line class="grid" x1="${pad.left}" x2="${width - pad.right}" y1="${yy}" y2="${yy}"/><text class="axis-label" x="${pad.left - 6}" y="${yy + 3}" text-anchor="end">${comma(value)}</text>`;
+  });
+  counts.forEach((value, index) => {
+    const cx = pad.left + slot * index + slot / 2;
+    const share = ((value / total) * 100).toFixed(1);
+    markup += `<rect x="${(cx - barW / 2).toFixed(1)}" y="${y(value).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1, pad.top + innerH - y(value)).toFixed(1)}" rx="2" fill="#2e5c51" opacity="${index >= counts.length - 2 ? 1 : 0.82}"/>`;
+    markup += `<text class="axis-label" x="${cx.toFixed(1)}" y="${(y(value) - 5).toFixed(1)}" text-anchor="middle">${share}%</text>`;
+    markup += `<text class="axis-label" x="${cx.toFixed(1)}" y="${(pad.top + innerH + 15).toFixed(1)}" text-anchor="middle">${labels[index]}</text>`;
+    markup += `<text class="axis-label" x="${cx.toFixed(1)}" y="${(pad.top + innerH + 27).toFixed(1)}" text-anchor="middle">(${comma(value)})</text>`;
+  });
+  markup += `<text class="axis-label" x="${pad.left}" y="${(height - 2).toFixed(1)}">minutes / day →</text>`;
+  svg.innerHTML = markup;
+  svg.onmousemove = event => {
+    const rect = svg.getBoundingClientRect();
+    const ratio = clamp((event.clientX - rect.left - pad.left) / innerW, 0, 1);
+    const index = clamp(Math.floor(ratio * counts.length), 0, counts.length - 1);
+    tooltip.innerHTML = `<b>${labels[index]} min / day</b><br><span style="color:#d9e6ae">●</span> ${comma(counts[index])} user-days (${((counts[index] / total) * 100).toFixed(1)}%)`;
+    tooltip.style.display = 'block';
+    tooltip.style.left = `${clamp(event.clientX - rect.left + 12, 5, rect.width - 170)}px`;
+    tooltip.style.top = `${clamp(event.clientY - rect.top - 55, 4, rect.height - 75)}px`;
+  };
+  svg.onmouseleave = () => { tooltip.style.display = 'none'; };
+}
+
+function refreshPerUser(start, end) {
+  const strip = document.getElementById('perUserStats');
+  const table = document.getElementById('perUserTable');
+  if (!state.perUser.available) {
+    strip.innerHTML = '<span class="stat-chip">per_user.csv not loaded — serve this page over HTTP so the file can be fetched.</span>';
+    table.innerHTML = '';
+    const missingHeadline = document.getElementById('perUserHeadline');
+    if (missingHeadline) missingHeadline.textContent = '';
+    return;
+  }
+  const rows = state.perUser.rows.filter(row => row.date >= start && row.date <= end);
+  if (!rows.length) {
+    strip.innerHTML = '<span class="stat-chip">No per-user data in this range</span>';
+    table.innerHTML = '';
+    const emptyHeadline = document.getElementById('perUserHeadline');
+    if (emptyHeadline) emptyHeadline.textContent = '';
+    renderHistogram('perUserHistChart', 'perUserHistTooltip', PER_USER_BUCKET_LABELS, PER_USER_BUCKET_LABELS.map(() => 0));
+    const empty = document.getElementById('perUserTrendChart');
+    if (empty) empty.innerHTML = '';
+    return;
+  }
+  const stats = perUserDailyStats(rows);
+  const pooled = rows.map(row => row.minutes).sort((a, b) => a - b);
+  const users = new Set(rows.map(row => row.user));
+  const mean = average(pooled);
+  const median = quantile(pooled, 0.5);
+  const p90 = quantile(pooled, 0.9);
+  const heavy = pooled.filter(value => value >= 60).length;
+  const maxVal = pooled[pooled.length - 1];
+  const maxRow = rows.reduce((best, row) => row.minutes > best.minutes ? row : best, rows[0]);
+  const hrs = minutes => `${(minutes / 60).toFixed(1)} h`;
+  strip.innerHTML = [
+    ['Users', comma(users.size)],
+    ['User-days', comma(rows.length)],
+    ['Mean', `${mean.toFixed(1)} min`],
+    ['Median', `${median.toFixed(1)} min`],
+    ['P90', `${p90.toFixed(1)} min`],
+    ['Heaviest day', `${comma(maxVal)} min`],
+    ['≥ 60 min share', `${((heavy / rows.length) * 100).toFixed(0)}%`]
+  ].map(([label, value]) => `<span class="stat-chip"><b>${value}</b>${label}</span>`).join('');
+  const headline = document.getElementById('perUserHeadline');
+  if (headline) headline.textContent = `A typical user spends ${median.toFixed(0)} min/day (≈ ${hrs(median)}). The top 10% exceed ${p90.toFixed(0)} min/day. The single heaviest day was ${comma(maxVal)} min (≈ ${hrs(maxVal)}) on ${formatDate(maxRow.date)} — an extreme outlier, not a typical user.`;
+
+  renderChart('perUserTrendChart', 'perUserTrendTooltip', [
+    { name: 'Mean', data: stats.map(item => ({ date: item.date, value: item.mean })), color: '#2e5c51', area: true, valueFormat: value => `${value.toFixed(1)} min` },
+    { name: 'Median', data: stats.map(item => ({ date: item.date, value: item.median })), color: '#c6893c', dash: '4 3', valueFormat: value => `${value.toFixed(1)} min` },
+    { name: 'P90', data: stats.map(item => ({ date: item.date, value: item.p90 })), color: '#7c6a93', width: 1.4, valueFormat: value => `${value.toFixed(1)} min` }
+  ]);
+
+  const counts = PER_USER_BUCKET_LABELS.map(() => 0);
+  pooled.forEach(value => {
+    for (let i = 0; i < PER_USER_BUCKETS.length - 1; i += 1) {
+      if (value >= PER_USER_BUCKETS[i] && value < PER_USER_BUCKETS[i + 1]) { counts[i] += 1; break; }
+    }
+  });
+  renderHistogram('perUserHistChart', 'perUserHistTooltip', PER_USER_BUCKET_LABELS, counts);
+
+  const byUser = new Map();
+  rows.forEach(row => {
+    if (!byUser.has(row.user)) byUser.set(row.user, { days: 0, total: 0, max: 0 });
+    const entry = byUser.get(row.user);
+    entry.days += 1; entry.total += row.minutes; entry.max = Math.max(entry.max, row.minutes);
+  });
+  const top = [...byUser.entries()]
+    .map(([user, entry]) => ({ user, ...entry, avg: entry.total / entry.days }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
+  table.innerHTML = '<thead><tr><th>#</th><th>User</th><th>Days</th><th>Total min</th><th>Avg min / day</th><th>Best day</th></tr></thead><tbody>' +
+    top.map((entry, index) =>
+      `<tr><td>${index + 1}</td><td class="mono">…${entry.user.slice(-8)}</td><td>${entry.days}</td><td>${comma(entry.total)}</td><td>${entry.avg.toFixed(1)}</td><td>${entry.max.toFixed(1)}</td></tr>`
+    ).join('') + '</tbody>';
+}
+
 function refresh() {
   const start = new Date(`${document.getElementById('startDate').value}T00:00:00`);
   const end = new Date(`${document.getElementById('endDate').value}T23:59:59`);
@@ -168,6 +339,7 @@ function refresh() {
   const activeStart = daily.active[0]?.value || 0;
   const activeEnd = daily.active.at(-1)?.value || 0;
   const movement = activeEnd - activeStart;
+  refreshPerUser(start, end);
   document.getElementById('insightText').textContent = movement >= 0
     ? `Daily activity rose by ${comma(movement)} users across this period; average daily use was ${mins.toFixed(1)} minutes per active user.`
     : `Daily activity moved down by ${comma(Math.abs(movement))} users across this period; average daily use was ${mins.toFixed(1)} minutes per active user.`;
@@ -198,11 +370,28 @@ function exportSelectedData() {
   URL.revokeObjectURL(url);
 }
 
+function exportPerUserData() {
+  const start = new Date(`${document.getElementById('startDate').value}T00:00:00`);
+  const end = new Date(`${document.getElementById('endDate').value}T23:59:59`);
+  const rows = state.perUser.rows.filter(row => row.date >= start && row.date <= end);
+  if (!rows.length) return;
+  const csv = ['user_pseudo_id,usage_date,daily_minutes_used',
+    ...rows.map(row => `${row.user},${iso(row.date)},${row.minutes}`)].join('\n');
+  const file = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(file);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `ravamate-per-user-${iso(start)}-to-${iso(end)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 async function init() {
   try {
-    const [engagementText, retentionText] = await Promise.all([
+    const [engagementText, retentionText, perUserText] = await Promise.all([
       fetch('Engagement_all.csv').then(response => response.text()),
-      fetch('Retention_all.csv').then(response => response.text())
+      fetch('Retention_all.csv').then(response => response.text()),
+      fetch('per_user.csv').then(response => response.text()).catch(() => '')
     ]);
     const engagement = parseExport(engagementText);
     const retention = parseExport(retentionText);
@@ -224,6 +413,10 @@ async function init() {
     // Firebase exports cohort retention as a 0–1 ratio; the rest of the dashboard labels it as a percentage.
     const cohortPercent = column => toPoints(cohort, column).map(point => ({ ...point, value: point.value * 100 }));
     state.retention = { day1: cohortPercent('Day 1'), day7: cohortPercent('Day 7'), day30: cohortPercent('Day 30') };
+    if (perUserText) {
+      state.perUser.rows = parsePerUser(perUserText);
+      state.perUser.available = state.perUser.rows.length > 0;
+    }
     const firstActivity = state.daily.active.find(point => point.value > 0)?.date || state.daily.active[0].date;
     state.min = firstActivity;
     state.max = state.daily.active.at(-1).date;
@@ -240,6 +433,7 @@ async function init() {
       refresh();
     }));
     document.getElementById('exportData').addEventListener('click', exportSelectedData);
+    document.getElementById('exportPerUser')?.addEventListener('click', exportPerUserData);
     window.addEventListener('resize', refresh);
     refresh();
   } catch (error) {
